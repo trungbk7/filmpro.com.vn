@@ -1,0 +1,106 @@
+/*
+ * Main herokit entry point for all embeds
+ * This file should be able to be cached via a CDN with a large TTL
+ */
+
+function getBasePath(path = '') {
+  const metaUrl = import.meta.url
+  const basePath = new URL(path, metaUrl).toString()
+  return basePath
+}
+
+let rootCount = {}
+
+class HeroKit extends HTMLElement {
+  constructor() {
+    super()
+    this._shadowRoot = this.attachShadow({ mode: 'open' })
+    this._rootId = -1
+    console.log('HeroKit.constructor', this.id)
+  }
+  connectedCallback() {
+    rootCount[this.id] = rootCount[this.id] || 0
+
+    // create unique rootId to support multiple instances of same embed (Framer editor)
+    this._rootId = rootCount[this.id]
+      ? `${this.id}_${rootCount[this.id]}`
+      : this.id
+
+    // default embed when editing hero from database
+    let scriptSrc = getBasePath(`./${this._rootId}.js`)
+
+    // check if preview
+    if (!!this.getAttribute('preview')) {
+      scriptSrc = getBasePath('./preview/' + this.getAttribute('type'))
+      this._rootId = 'preview'
+    }
+
+    // check if editing a draft
+    if (!!this.getAttribute('draft')) {
+      scriptSrc += '?draft'
+    }
+
+    // save shadow root for this id in global namespace
+    window.__HEROKIT__ = window.__HEROKIT__ || {}
+    window.__HEROKIT__.roots = window.__HEROKIT__.roots || {}
+    window.__HEROKIT__.roots[this._rootId] = this._shadowRoot
+
+    console.log('HeroKit.connectedCallback()', this._rootId, `${this.id}`)
+
+    // Note: need to render template here as attributes are missing on HMR in constructor
+    const html = `
+      <style>
+        :host {
+          /* Custom elements are inline by default */
+          /* use grid to make child expand to height and respect min-height */
+          display: grid;
+          /* Need explicit full width to fill its parent */
+          width: 100%;
+          /* position watermark relative to host */
+          position: relative;
+          /* hide until loaded */
+          visibility: hidden;
+          /* fill parent or viewport height by default */
+          height: ${this.getAttribute('height') || '100%'};
+          min-height: ${this.getAttribute('height') || '100vh'};
+        }
+        :host #root {
+          height: 100%;
+          width: 100%;
+        }
+        /* Needed for Framer editor which wraps canvas in CSS transforms */
+        :host canvas {
+          width: 100% !important;
+          height: 100% !important;
+        }
+      </style>
+      <script src="${scriptSrc}"></script>
+      <div id="root"></div>
+      `
+    const scriptEl = document.createRange().createContextualFragment(html)
+    this._shadowRoot.appendChild(scriptEl)
+
+    console.log(
+      'Hero-kit.js append child for',
+      this._rootId,
+      this.getAttribute('type'),
+      'root:',
+      this._shadowRoot
+    )
+
+    // increment root count
+    rootCount[this.id]++
+  }
+
+  disconnectedCallback() {
+    this._shadowRoot.textContent = ''
+    console.log(
+      'HeroKit.disconnectedCallback()',
+      this._rootId,
+      'root',
+      this._shadowRoot
+    )
+  }
+}
+
+window.customElements.define('hero-kit', HeroKit)
